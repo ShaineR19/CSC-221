@@ -16,6 +16,9 @@ M4GroupAPro
 """
 import traceback
 import pandas as pd
+import re
+import os
+import xlsxwriter
 from openpyxl import load_workbook
 
 def menu():
@@ -480,171 +483,54 @@ def clean_instructor_name(name):
     return f"{last_name}{first_initial}_FTE.xlsx"
 
 
-def instructorFTE(file_in):
+def clean_name_for_search(name):
     '''
-    Analyze FTE by instructor within a division.
+    Standardize name format for searching.
+    Removes periods and extra spaces.
 
     Parameters
     ----------
-    file_in : pandas.DataFrame
-        Input DataFrame containing course information.
+    name : str
+        Name to clean
 
     Returns
     -------
-    None
+    str
+        Cleaned name for comparison
     '''
-    print()
-    # Get unique faculty names for reference
-    faculty = sorted(file_in['Sec Faculty Info'].dropna().unique())
-    print(f"Found {len(faculty)} faculty members")
+    return name.replace('.', '').strip().lower()
 
-    while True:
-        print("\nEnter instructor name (first or last name)")
-        print("Type 'list' to see all instructors")
-        print("Type 'back' for main menu")
 
-        faculty_name = input("\nEnter name: ").strip()
+def clean_instructor_name(name):
+    '''
+    Clean instructor name for file naming.
+    Handles different formats like "H Seidi", "H. Seidi", etc.
 
-        if faculty_name.lower() == 'back':
-            print("\nReturning to main menu...")
-            return
+    Parameters
+    ----------
+    name : str
+        Instructor name
 
-        if faculty_name.lower() == 'list':
-            print("\nInstructors:")
-            for i in range(0, len(faculty), 3):
-                names = faculty[i:i+3]
-                print("  ".join(f"{name:<30}" for name in names))
-            continue
+    Returns
+    -------
+    str
+        Cleaned name formatted for filename
+    '''
+    # Split by comma first if it exists
+    if ',' in name:
+        last_name, first_part = name.split(',', 1)
+        # Clean up the last name and first initial
+        last_name = last_name.strip().lower()
+        # Get first character and remove any periods
+        first_initial = first_part.strip().replace('.', '')[0].lower()
+    else:
+        # Handle space-separated names
+        parts = name.split()
+        last_name = parts[-1].lower()
+        # Get first character and remove any periods
+        first_initial = parts[0].replace('.', '')[0].lower()
 
-        if not faculty_name:
-            print("Please enter a valid name.")
-            continue
-
-        # Case-insensitive search for partial matches with standardized format
-        cleaned_input = clean_name_for_search(faculty_name)
-        matches = [f for f in faculty if cleaned_input
-                   in clean_name_for_search(f)]
-        print(f"Found {len(matches)} matching instructors")
-
-        if not matches:
-            print(f"No instructors found matching '{faculty_name}'.")
-            print("Try searching without periods (.) or check \
-the instructor list.")
-            continue
-
-        if len(matches) > 1:
-            print("\nMultiple instructors found:")
-            for i, name in enumerate(matches, 1):
-                print(f"{i}. {name}")
-            choice = input("\nEnter number to select \
-instructor (or press Enter to search again): ")
-            if not choice.isdigit() or int(choice) < 1\
-                    or int(choice) > len(matches):
-                continue
-            selected_faculty = matches[int(choice) - 1]
-        else:
-            selected_faculty = matches[0]
-
-        print(f"\nProcessing data for: {selected_faculty}")
-
-        try:
-            # Filter data for selected instructor
-            instructor_data = file_in[file_in['Sec Faculty Info']
-                                      == selected_faculty].copy()
-            print(f"Found {len(instructor_data)} initial rows")
-
-            if len(instructor_data) == 0:
-                print("No courses found for this instructor.")
-                continue
-
-            # Add course code column
-            instructor_data['Course Code'] = \
-                instructor_data['Sec Name'].str.extract(r'([A-Z]+-\d+)')
-
-            # Sort by Course Code and Sec Name
-            instructor_data = \
-                instructor_data.sort_values(['Course Code', 'Sec Name'])
-
-            # Prepare data for Excel
-            data_for_excel = []
-            current_course = None
-            course_total_fte = 0
-
-            for _, row in instructor_data.iterrows():
-                course = row['Course Code']
-
-                # If new course and not first course,
-                #  add total for previous course
-                if course != current_course and current_course is not None:
-                    data_for_excel.append([
-                        '',                     # Instructor
-                        'Total',                # Course Code
-                        '',                     # Sec Name
-                        '',                     # Delivery Method
-                        '',                     # Meeting Times
-                        '',                     # Capacity
-                        '',                     # FTE Count
-                        course_total_fte,       # Total FTE
-                        ''                      # Divisions
-                    ])
-                    course_total_fte = 0
-
-                # Add current row
-                data_for_excel.append([
-                    selected_faculty if current_course is None else '',
-                    course if course != current_course else '',
-                    row['Sec Name'],
-                    row['X Sec Delivery Method'],
-                    row['Meeting Times'],
-                    row['Capacity'],
-                    row['FTE Count'],
-                    row['Total FTE'],
-                    row['Sec Divisions']
-                ])
-
-                # Update tracking variables
-                course_total_fte += float(row['Total FTE'])
-                current_course = course
-
-            # Add total for last course
-            if current_course is not None:
-                data_for_excel.append([
-                    '',                     # Instructor
-                    'Total',                # Course Code (moved Total here)
-                    '',                     # Sec Name
-                    '',                     # Delivery Method
-                    '',                     # Meeting Times
-                    '',                     # Capacity
-                    '',                     # FTE Count
-                    course_total_fte,       # Total FTE
-                    ''                      # Divisions
-                ])
-
-            # Convert to DataFrame
-            columns = ['Instructor', 'Course Code', 'Sec Name',
-                       'X Sec Delivery Method',
-                       'Meeting Times', 'Capacity', 'FTE Count',
-                       'Total FTE', 'Sec Divisions']
-            output_df = pd.DataFrame(data_for_excel, columns=columns)
-
-            # Create Excel file name using the clean_instructor_name function
-            excel_filename = clean_instructor_name(selected_faculty)
-            print(f"\nCreating file: {excel_filename}")
-
-            # Write to Excel
-            output_df.to_excel(excel_filename, index=False)
-            print(f"Written {len(output_df)} rows to Excel")
-
-            print(f"\nAnalysis for instructor: {selected_faculty}")
-            print(f"Results exported to {excel_filename}")
-            break
-
-        except Exception as e:
-            print(f"Error processing data: {str(e)}")
-            print(traceback.format_exc())
-            continue
-
-    return
+    return f"{last_name}{first_initial}_FTE.xlsx"
 
 
 def clean_course_code(code):
