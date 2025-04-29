@@ -4,17 +4,18 @@ Takes data from deanDailyCsar.xlsx and FTE_Tier.xlsx to determine classes FTE.
 Allows the user to Get Course Enrollment, and get FTE by Division, Instructor,
 and Course. 
 
-GROUP A
-Teresa Hearn, Shiane Ransford, Latoya Winston
+GROUP A & B
+Thuan Chau, Karen Brown, Harley Coughlin,Teresa Hearn, Shiane Ransford, Latoya Winston
 
-3/18/2025
+04/28/2025
 
 CSC-221-001
 
-M4GroupAPro
+M7GroupAnBPro
 
 """
 import functions as fn
+import options4 
 
 
 def main():
@@ -41,7 +42,7 @@ def main():
 
                 print("option 1: Enter Sec Divison codes")
                 # calls the function to write excel file by division.
-                fn.SecDivisions(file_in)
+                fn.sec_divisions(file_in)
 
             elif choice == '2':
                 print("\nOption 2: Enrollment Percentage")
@@ -56,7 +57,7 @@ def main():
             elif choice == '4':
                 print("\nOption 4: FTE by Instructor: ")
                 # gets FTE by instructor
-                fn.instructorFTE(file_in)
+                options4.fte_per_faculty(file_in)
 
             elif choice == '5':
                 print("\nOption 2: FTE by Course: ")
