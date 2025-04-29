@@ -1,7 +1,10 @@
-﻿import pandas as pd
+import pandas as pd
 import re
 import os
 import xlsxwriter
+import traceback
+from openpyxl import load_workbook
+from openpyxl.styles import Font, Border, Side, PatternFill
 
 
 def clean_name_for_search(name):
@@ -65,7 +68,7 @@ def fte_per_faculty(data):
     course_tier: pd.DataFrame
         DataFrame to extract information from
     """
-
+    
     print()
     # Get unique faculty names for reference
     faculty = sorted(data['Sec Faculty Info'].dropna().unique())
@@ -123,7 +126,6 @@ instructor (or press Enter to search again): ")
 
     print(f"\nProcessing data for: {selected_faculty}")
         
-
     name = selected_faculty
 
     # Read FTE tier data
@@ -132,10 +134,12 @@ instructor (or press Enter to search again): ")
     # Filter data for the selected faculty
     frame = data[data["Sec Faculty Info"] == selected_faculty].copy()
 
+    frame = remove_duplicate_sections(frame)
+
     # Select columns of interest
     frame = frame[[
     "Sec Name", "X Sec Delivery Method", "Meeting Times",
-    "Capacity", "FTE Count", "Total FTE"
+    "Capacity", "FTE Count", "Total FTE", "Sec Divisions"
     ]]
 
     # Get course codes
@@ -157,47 +161,35 @@ instructor (or press Enter to search again): ")
     if course_tier is not None:
         frame = generate_fte(frame, course_tier)
 
-    # Setup Excel parameters
-    first_cell = 'A1'  # you need to define these depending on your Excel format
-    apply_filter = True  # or False depending on your needs
-
     # Create the Excel file
-    create_fte_excel(
+    create_instructor_excel(
         data=frame,
         name=filename,
         course_codes=course_codes,
-        first_cell=first_cell,
-        apply_filter=apply_filter
+        instructor_name=selected_faculty
     )
-    
 
 
-def create_fte_excel(data, name, course_codes, first_cell=None,
-                     apply_filter=True):
-    """Writes a formatted FTE excel file to the current directory
+def create_instructor_excel(data, name, course_codes, instructor_name):
+    """Creates an Excel report for instructor FTE data
 
     Parameters
     ----------
     data: pd.DataFrame
-        Division dataframe.
+        Instructor data frame
     name: str
-        Name of the excel file.
-    course_codes: list[str]
-        List of unique course codes without section information.
-    first_cell: str | None (default = None)
-        If not None, the value will be written to the first cell
-        of the sheet.
-    apply_filter: bool
-        If true, course frame will be filtered.
+        Name for the Excel file
+    course_codes: list
+        List of course codes to include
+    instructor_name: str
+        Name of the instructor for the report
     """
-
-    # Get the total FTE values
-    course_totals, final_total = total_ftes(data)
-
-    # Determine if faculty or div file to use as label for final total
-    is_faculty_report = "Faculty Name" in data.columns
-    total_label = "Faculty Total" if is_faculty_report else "Div Total"
-
+   
+    # Calculate totals
+    total_original_fte = data["Total FTE"].sum()
+    total_generated_fte = data["Generated FTE"].sum() if "Generated FTE" in data.columns else 0
+    
+    # Create the Excel filename
     course_name = re.match(r"[A-Z]{3}-\d{3}[A-Z]?", name)
     if course_name is not None:
         filename = name.split("-")[0].lower() + name.split("-")[1]
@@ -206,98 +198,157 @@ def create_fte_excel(data, name, course_codes, first_cell=None,
     filename += "_FTE.xlsx"
     file_path = os.path.join(os.getcwd(), filename)
 
-    current_row = 0
-    start_column = 1 if first_cell is None else 2
-
+    # Create Excel workbook
     excel_options = {'nan_inf_to_errors': True}
     with xlsxwriter.Workbook(file_path, excel_options) as workbook:
         worksheet = workbook.add_worksheet()
-
-        # Create a format for dollar amounts
+        
+        # Define formats
+        header_format = workbook.add_format({'bold': True})
+        number_format = workbook.add_format({'num_format': '#,##0.00'})
         money_format = workbook.add_format({'num_format': '$#,##0.00'})
-
-        # Write the header row.
-        if first_cell is not None:
-            worksheet.write(current_row, 0, first_cell)
-            worksheet.write(current_row, 1, "Course Code")
-            worksheet.write_row(0, start_column, data.columns)
-        else:
-            worksheet.write(current_row, 0, "Course Code")
-            worksheet.write_row(0, start_column, data.columns)
-
-        current_row += 1
-        # Write the course information.
+        total_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#E0E0E0'
+        })
+        total_number_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#E0E0E0',
+            'num_format': '#,##0.00'
+        })
+        total_money_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#E0E0E0',
+            'num_format': '$#,##0.00'
+        })
+        
+        # Write header row
+        headers = ["Instructor", "Course Code", "Sec Name", "X Sec Delivery Method", 
+                 "Meeting Times", "Capacity", "FTE Count", "Total FTE", "Sec Divisions"]
+        
+        # Add Generated FTE column to headers
+        if "Generated FTE" in data.columns:
+            headers.append("Generated FTE")
+        
+        for col, header in enumerate(headers):
+            worksheet.write(0, col, header, header_format)
+        
+        # Track current row
+        current_row = 1
+        
+        # Write instructor name in first row, first column
+        worksheet.write(current_row, 0, instructor_name)
+        
+        # Process each course
+        grand_total_fte = 0
+        grand_total_generated_fte = 0
+        
         for course in course_codes:
-            course_info = get_course_frame(data, course, apply_filter)
-            course_info = sort_dataframe(course_info, ["Sec Name"])
-
-            # Write course name to the cell in the column/row before the
-            # course information.
-            worksheet.write(current_row, start_column - 1, course)
-            current_row += 1
-
-            # Write the course information.
-            #for row in course_info.itertuples(index=False):
-                #worksheet.write_row(current_row, start_column, row)
-                #current_row += 1
-            for row in course_info.itertuples(index=False):
-                for col_idx, value in enumerate(row):
-                    absolute_col_idx = start_column + col_idx
-                    column_name = data.columns[col_idx]
-
-                    if column_name == "Generated FTE" and value is not None:
-                        worksheet.write_number(current_row, absolute_col_idx, value, money_format)
-                    else:
-                        worksheet.write(current_row, absolute_col_idx, value)
+            # Filter data for this course
+            course_data = data[data["Sec Name"].str.contains(course, case=False, na=False)].copy()
+            course_data = course_data.sort_values(by=["Sec Name"])
+            
+            # Write course code in first column
+            worksheet.write(current_row, 1, course)
+            
+            # Track course totals
+            course_total_fte = 0
+            course_total_generated_fte = 0
+            
+            # Process each section in the course
+            for _, row in course_data.iterrows():
+                # Calculate running totals
+                course_total_fte += row["Total FTE"]
+                if "Generated FTE" in data.columns:
+                    course_total_generated_fte += row["Generated FTE"]
+                
+                # Write row data
+                worksheet.write(current_row, 2, row["Sec Name"])
+                worksheet.write(current_row, 3, row["X Sec Delivery Method"])
+                worksheet.write(current_row, 4, row["Meeting Times"])
+                worksheet.write(current_row, 5, row["Capacity"])
+                worksheet.write(current_row, 6, row["FTE Count"])
+                worksheet.write_number(current_row, 7, row["Total FTE"], number_format)
+                
+                # Handle #NUM! or missing values in Sec Divisions
+                if pd.notna(row["Sec Divisions"]) and str(row["Sec Divisions"]) != "#NUM!":
+                    worksheet.write(current_row, 8, row["Sec Divisions"])
+                else:
+                    worksheet.write(current_row, 8, "")  # Write empty string for missing/error values
+                
+                # Write Generated FTE if available
+                if "Generated FTE" in data.columns:
+                    worksheet.write_number(current_row, 9, row["Generated FTE"], money_format)
+                
                 current_row += 1
-
-
-            # Write total.
-            worksheet.write(current_row, start_column - 1, "Total")
-
-            fte_column_index = data.columns.get_loc("Generated FTE") + start_column \
-                if "Generated FTE" in data.columns else start_column + 4
-
-            # Write total.
-            worksheet.write(current_row, start_column - 1, "Total")
-            worksheet.write_number(current_row, fte_column_index, course_totals.get(course, 0), money_format)
-            current_row += 1
-
-        # Write div total for division, instructor
-        if first_cell is not None:
-            worksheet.write(current_row, 1, total_label)
-            worksheet.write_number(current_row, fte_column_index, final_total, money_format)
-
+            
+            # Update grand totals
+            grand_total_fte += course_total_fte
+            grand_total_generated_fte += course_total_generated_fte
+            
+            # Write course total row
+            worksheet.write(current_row, 1, "Total")  # Put Total under Course Code column
+            worksheet.write_number(current_row, 7, course_total_fte, number_format)
+            
+            # Write Generated FTE course total if available
             if "Generated FTE" in data.columns:
-                fte_column_index = data.columns.get_loc(
-                    "Generated FTE") + start_column
+                worksheet.write_number(current_row, 9, course_total_generated_fte, money_format)
+            
+            current_row += 1
+        
+        # Write grand total row
+        for col in range(len(headers)):
+            # Apply formatting to all cells in the Total row
+            if col == 1:  # Put Total in Course Code column (column B)
+                worksheet.write(current_row, col, "Total", total_format)
+            elif col == 7:  # Total FTE column
+                worksheet.write_number(current_row, col, grand_total_fte, total_number_format)
+            elif col == 9 and "Generated FTE" in data.columns:  # Generated FTE column
+                worksheet.write_number(current_row, col, grand_total_generated_fte, total_money_format)
             else:
-                fte_column_index = data.columns.get_loc(
-                    "Generated FTE"
-                ) + start_column if "Generated_FTE" in data.columns else start_column + 4
-            worksheet.write(current_row, fte_column_index, final_total, money_format)
+                worksheet.write(current_row, col, "", total_format)
+        
+        # Format columns to appropriate width
+        column_widths = {
+            0: 15,  # Instructor
+            1: 12,  # Course Code
+            2: 15,  # Sec Name
+            3: 20,  # X Sec Delivery Method
+            4: 40,  # Meeting Times
+            5: 10,  # Capacity
+            6: 10,  # FTE Count
+            7: 10,  # Total FTE
+            8: 15,  # Sec Divisions
+            9: 15   # Generated FTE
+        }
+        
+        for col, width in column_widths.items():
+            if col < len(headers):
+                worksheet.set_column(col, col, width)
+    
+    # Open with openpyxl to add bottom border above total
+    wb = load_workbook(file_path)
+    ws = wb.active
+    
+    # Get last row (where the total is)
+    last_row = ws.max_row
+    
+    # Add a bottom border to cells before the total
+    if last_row > 2:  # Make sure there are rows before the total
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=last_row-1, column=col)
+            cell.border = Border(
+                bottom=Side(style='thin')
+            )
+    
+    wb.save(file_path)
+    
+    # Print summary
+    print(f"\nCreated file: {file_path}")
+    print(f"Total FTE for {instructor_name}: {grand_total_fte:.2f}")
+    if "Generated FTE" in data.columns:
+        print(f"Total Generated FTE for {instructor_name}: ${grand_total_generated_fte:.2f}")
 
-        # Try to fit the columns to the data.
-        #worksheet.set_column(0, start_column + len(data.columns), 25)  # Set width for all columns
-        for col_idx in range(start_column + len(data.columns) + 1):
-            # Set specific widths for known columns
-            if col_idx == 0 and first_cell is not None:  # First cell column
-                worksheet.set_column(col_idx, col_idx, 15)
-            elif col_idx == start_column - 1:  # Course Code column
-                worksheet.set_column(col_idx, col_idx, 12)
-            elif "Sec Name" in data.columns and col_idx == data.columns.get_loc("Sec Name") + start_column:
-                worksheet.set_column(col_idx, col_idx, 10)  # Section name
-            elif "Faculty Name" in data.columns and col_idx == data.columns.get_loc("Faculty Name") + start_column:
-                worksheet.set_column(col_idx, col_idx, 20)  # Faculty name
-            elif "Generated FTE" in data.columns and col_idx == data.columns.get_loc("Generated FTE") + start_column:
-                worksheet.set_column(col_idx, col_idx, 12)  # FTE values
-            elif "Enrollment Per" in data.columns and col_idx == data.columns.get_loc("Enrollment Per") + start_column:
-                worksheet.set_column(col_idx, col_idx, 14)  # Enrollment percentage
-            else:
-                # Other columns get a reasonable default
-                worksheet.set_column(col_idx, col_idx, 15)
-
-    print(f"Created file: {file_path}")
 
 def get_course_frame(data, name, apply_filter=True):
     """Extracts rows associated with a course code
@@ -331,6 +382,7 @@ def get_course_frame(data, name, apply_filter=True):
         frame = remove_duplicate_sections(frame)
 
     return frame
+
 
 def remove_duplicate_sections(frame):
     """
@@ -752,6 +804,7 @@ def get_column_uniques(data, name):
     assert isinstance(data, pd.DataFrame)
     assert name is not None
 
+    
     # Extract unique, non-null values
     unique_values = data[name].dropna().unique()
     # Explicit conversion to list[str] to prevent type errors
@@ -812,3 +865,8 @@ def fte_faculty_submenu(faculty):
             continue  # Restart loop
 
         return found_name  # Return found faculty name
+
+
+
+
+
