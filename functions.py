@@ -5,21 +5,25 @@ Allows the user to Get Course Enrollment, and get FTE by Division, Instructor,
 and Course.
 
 GROUP A
-Teresa Hearn, Shiane Ransford, Latoya Winston
+Thuan Chau, Karen Brown, Harley Coughlin,Teresa Hearn, Shiane Ransford, Latoya Winston
 
-3/18/2025
+04/28/2025
 
 CSC-221-001
 
-M4GroupAPro
+M7GroupAnBPro
 
 """
 import traceback
+#import re
+#import os
 import pandas as pd
-import re
-import os
-import xlsxwriter
+#import xlsxwriter
 from openpyxl import load_workbook
+from openpyxl.styles import Font, Border, Side, PatternFill
+#import openpyxl
+from openpyxl.utils import get_column_letter
+
 
 def menu():
     '''
@@ -39,6 +43,7 @@ def menu():
     print('5) FTE per course (for specific Div)')
     print('6) Exit')
     print("="*44)
+
 
 def readfile():
     '''
@@ -77,13 +82,13 @@ def readfile():
         merged_df["FTE Count"] = pd.to_numeric(merged_df["FTE Count"], errors='coerce')
 
         # Calculate Total FTE
-        merged_df["Total FTE"] = ((merged_df["Contact Hours"] * 16 * merged_df["FTE Count"]) / 512).round(3)
+        merged_df["Total FTE"] = ((merged_df["Contact Hours"] * 16 *\
+                                   merged_df["FTE Count"]) / 512).round(3)
 
 
         # sorts the dataframe by sec divisions, sec name
         # and sec faculty info and assigns it to groups
-        groups = file_in.sort_values(["Sec Divisions", "Sec Name",
-                                      "Sec Faculty Info"])
+        groups = merged_df.sort_values(["Sec Divisions", "Sec Name", "Sec Faculty Info"])
 
         return groups
 
@@ -92,7 +97,52 @@ def readfile():
         print("File Missing!")
         return groups
 
-def SecDivisions(file_in):
+
+def auto_format_excel(filename):
+    """
+    Auto-formats the column widths of an Excel file to fit the content.
+    
+    Parameters
+    ----------
+    filename : str
+        The name of the Excel file to format.
+    
+    Returns
+    -------
+    None.
+    """
+    try:
+
+
+        # Load the workbook and select the active sheet
+        wb = load_workbook(filename)
+        ws = wb.active
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+
+            # Adjust width with a little extra space
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Save the formatted workbook
+        wb.save(filename)
+        print(f"Formatted {filename} with auto-adjusted column widths")
+
+    except Exception as err:
+        print(f"Error formatting Excel file: {str(err)}")
+
+
+def sec_divisions(file_in):
     '''
     Allows user to enter sec divisions to search for.
 
@@ -135,22 +185,34 @@ def SecDivisions(file_in):
             if div.upper() not in [d.upper() for d in sec_group]:
                 print(f"\nWarning: Division '{div}' not found")
 
-        
+
         for division in divisions_to_process:
             if division.upper() in [d.upper() for d in sec_group]:
-                # actual_division = next(d for d in sec_group if d.upper() == division.upper())
-                # process_division(file_in, actual_division)
-
                 # Extract rows for selected division into a new dataframe
                 # Convert division name to lowercase for dataframe name
                 df_names = division.lower()
-                df_name = file_in[file_in['Sec Divisions'] == division].copy()
+
+                # Filter for the division and remove "Course Code" column if it exists,
+                # ensure "Contact Hours" is included
+                if "Course Code" in file_in.columns:
+                    # Get all columns except "Course Code"
+                    columns_to_keep = [col for col in file_in.columns if col != "Course Code"]
+                    df_name = file_in[file_in['Sec Divisions'] == division][columns_to_keep].copy()
+                else:
+                    df_name = file_in[file_in['Sec Divisions'] == division].copy()
+
+                # Check if "Contact Hours" is in the dataframe
+                if "Contact Hours" not in df_name.columns:
+                    print(f"\nWarning: 'Contact Hours' column not found in the data")
 
                 # Create Excel filename (lowercase)
                 excel_filename = f"{division.lower()}.xlsx"
 
                 # Write to Excel
                 df_name.to_excel(excel_filename, index=False)
+
+                # Auto-format the Excel file columns
+                auto_format_excel(excel_filename)
 
                 print(f"\nCreated DataFrame '{df_names}' with {len(df_name)} rows")
                 print(f"Saved to file: {excel_filename}")
@@ -159,6 +221,7 @@ def SecDivisions(file_in):
         print("Missing information from file. Check to be sure the file is not missing.")
     except Exception as err:
         print("Error: "+str(err))
+
 
 def option2_enrollment(df):
     '''
@@ -238,13 +301,35 @@ def option2_enrollment(df):
     wb = load_workbook(file_name)
     ws = wb.active
 
-    for column_cells in ws.columns:
-        column_letter = column_cells[0].column_letter
-        ws.column_dimensions[column_letter].width = 25
 
+
+    # Adjust column widths dynamically
+    for column_cells in ws.columns:
+        column_letter = get_column_letter(column_cells[0].column)
+        max_length = 0
+        column_name = column_cells[0].value  # Header value
+
+        for cell in column_cells:
+            try:
+                if cell.value:
+                    cell_length = len(str(cell.value))
+                    if cell_length > max_length:
+                        max_length = cell_length
+            except:
+                pass
+
+        # If column is "Meeting Times", make it extra wide
+        if column_name == "Meeting Times":
+            ws.column_dimensions[column_letter].width = max_length + 1
+        else:
+            ws.column_dimensions[column_letter].width = 25
     # Save the File
     wb.save(file_name)
     print(f"Created '{file_name}' with enrollment data.")
+
+
+
+
 
 def division_fte(file_in):
     '''
@@ -259,6 +344,8 @@ def division_fte(file_in):
     -------
     None
     '''
+
+
     print()
     # Get unique division codes
     divisions = sorted(file_in['Sec Divisions'].dropna().unique())
@@ -318,6 +405,10 @@ def division_fte(file_in):
         course_total_fte = 0
         first_row = True
 
+        # Track grand totals
+        grand_total_fte = 0
+        grand_total_original_fte = 0
+
         # Process each row
         for _, row in div_data.iterrows():
             course = row['Course Code']
@@ -337,6 +428,10 @@ def division_fte(file_in):
                     'Enrollment Per': '',
                     'Generated FTE': course_total_fte
                 })
+
+                # Add to grand total
+                grand_total_fte += course_total_fte
+
                 course_total_fte = 0
 
             # Get section prefix (first 3 characters of section name)
@@ -346,10 +441,13 @@ def division_fte(file_in):
             new_sector_value = fte_lookup.get(sec, 0)
 
             # Calculate adjusted FTE for the current row
-            total_fte = float(row['Total FTE'])
-            
-            #Calculate adjusted_fte
-            adjusted_fte = (total_fte * (new_sector_value + base_fte_value))
+            total_fte = float(row['Total FTE']) if pd.notna(row['Total FTE']) else 0
+
+            # Add to grand total of original FTE
+            grand_total_original_fte += total_fte
+
+            # Calculate adjusted_fte
+            adjusted_fte = total_fte * (new_sector_value + base_fte_value)
 
             # Calculate enrollment percentage
             enrollment_per = ''
@@ -357,7 +455,7 @@ def division_fte(file_in):
                         float(row['Capacity']) > 0:
 
                 enrollment_per = (float(row['FTE Count']) / float(row['Capacity'])) * 100
-                enrollment_per = f"{round(enrollment_per, 2)}%"  # Add percentage sign here
+                enrollment_per = "{:.2f}%".format(round(enrollment_per, 2)) 
 
             # Add current row with enrollment percentage and generated FTE
             output_rows.append({
@@ -396,10 +494,34 @@ def division_fte(file_in):
                 'Generated FTE': course_total_fte
             })
 
+            # Add last course total to grand total
+            grand_total_fte += course_total_fte
+            
+        # Add grand total row with formatted total
+        output_rows.append({
+            'Division': '',
+            'Course Code': 'DIVISION TOTAL',
+            'Sec Name': '',
+            'X Sec Delivery Method': '',
+            'Meeting Times': '',
+            'Capacity': '',
+            'FTE Count': '',
+            'Sec Faculty Info': '',
+            'Total FTE': float(grand_total_original_fte),  # Ensure it's a float
+            'Enrollment Per': '',
+            'Generated FTE': float(grand_total_fte)  # Ensure it's a float
+        })
+
         # Format Generated FTE column with '$' before the number
         # and a comma every 3 digits
         for row in output_rows:
-            row['Generated FTE'] = f"${row['Generated FTE']:,.2f}"
+            # Format Generated FTE if it's a number
+            if isinstance(row['Generated FTE'], (int, float)):
+                row['Generated FTE'] = "${:,.2f}".format(row['Generated FTE'])
+            
+            # Format Total FTE if it's a number (including the grand total)
+            if isinstance(row['Total FTE'], (int, float)):
+                row['Total FTE'] = "{:.2f}".format(row['Total FTE'])
 
         # Convert to DataFrame
         output_df = pd.DataFrame(output_rows)
@@ -421,11 +543,37 @@ def division_fte(file_in):
                     len(str(col))
                 ) + 2
                 worksheet.column_dimensions[chr(65 + idx)].width = max_length
+                
+            # Apply bold formatting to the Division Total row
+            last_row = len(output_df) + 1  # +1 because Excel rows are 1-indexed and we have a header row
+            for col in range(1, len(output_df.columns) + 1):
+                cell = worksheet.cell(row=last_row, column=col)
+                cell.font = Font(bold=True)
+                
+            # Add a bottom border to cells before the grand total
+            second_last_row = last_row - 1
+            if second_last_row > 1:  # Make sure there are rows before the total
+                for col in range(1, len(output_df.columns) + 1):
+                    cell = worksheet.cell(row=second_last_row, column=col)
+                    cell.border = Border(
+                        bottom=Side(style='thin')
+                    )
+                    
+            # Add background color to the grand total row
+            for col in range(1, len(output_df.columns) + 1):
+                cell = worksheet.cell(row=last_row, column=col)
+                cell.fill = PatternFill(
+                    start_color="E0E0E0", 
+                    end_color="E0E0E0",
+                    fill_type="solid"
+                )
 
-        print(f"\nAnalysis for division: {actual_div}")
-        print(f"Results exported to {excel_filename}")
+        print("\nAnalysis for division: {}".format(actual_div))
+        print("Results exported to {}".format(excel_filename))
+        print("Division Total Original FTE: {:.2f}".format(grand_total_original_fte))
+        print("Division Total Generated FTE: ${:,.2f}".format(grand_total_fte))
 
-    except (FileNotFoundError, ValueError, KeyError):
+    except Exception as e:
         print("Error processing data")
         print(traceback.format_exc())
         return
@@ -481,56 +629,7 @@ def clean_instructor_name(name):
         first_initial = parts[0].replace('.', '')[0].lower()
 
     return f"{last_name}{first_initial}_FTE.xlsx"
-
-
-def clean_name_for_search(name):
-    '''
-    Standardize name format for searching.
-    Removes periods and extra spaces.
-
-    Parameters
-    ----------
-    name : str
-        Name to clean
-
-    Returns
-    -------
-    str
-        Cleaned name for comparison
-    '''
-    return name.replace('.', '').strip().lower()
-
-
-def clean_instructor_name(name):
-    '''
-    Clean instructor name for file naming.
-    Handles different formats like "H Seidi", "H. Seidi", etc.
-
-    Parameters
-    ----------
-    name : str
-        Instructor name
-
-    Returns
-    -------
-    str
-        Cleaned name formatted for filename
-    '''
-    # Split by comma first if it exists
-    if ',' in name:
-        last_name, first_part = name.split(',', 1)
-        # Clean up the last name and first initial
-        last_name = last_name.strip().lower()
-        # Get first character and remove any periods
-        first_initial = first_part.strip().replace('.', '')[0].lower()
-    else:
-        # Handle space-separated names
-        parts = name.split()
-        last_name = parts[-1].lower()
-        # Get first character and remove any periods
-        first_initial = parts[0].replace('.', '')[0].lower()
-
-    return f"{last_name}{first_initial}_FTE.xlsx"
+   
 
 
 def clean_course_code(code):
@@ -547,9 +646,8 @@ def clean_course_code(code):
 def fte_per_course(file_in):
     """
     Calculate and export FTE data for a specific course.
-
-
     """
+   
     print()
     # Step 1: Extract course codes from section names using regex
     file_in['Course Code'] = file_in['Sec Name'].str.extract(r'([A-Z]+-\d+)')
@@ -574,16 +672,24 @@ type 'back' to return to main menu:")
             continue
 
         # Step 2e: Select specific course (or have user select if multiple matches)
-        selected_course = matching_courses[0] \
-            if len(matching_courses) == 1 else\
-            matching_courses[int(input("Enter number to select course: ")) - 1]
+        if len(matching_courses) == 1:
+            selected_course = matching_courses[0]
+        else:
+            print("\nMultiple courses found:")
+            for i, course in enumerate(matching_courses, 1):
+                print(f"{i}. {course}")
+            selection = input("\nEnter number to select course: ")
+            if not selection.isdigit() or int(selection) < 1 or\
+                 int(selection) > len(matching_courses):
+                print("Invalid selection.")
+                continue
+            selected_course = matching_courses[int(selection) - 1]
 
         print(f"\nProcessing data for course: {selected_course}")
 
         try:
             # Step 3a: Filter data for selected course
-            course_data = file_in[file_in['Course Code']
-                                 == selected_course].copy()
+            course_data = file_in[file_in['Course Code'] == selected_course].copy()
             if course_data.empty:
                 print("No sections found for this course.")
                 continue
@@ -604,35 +710,33 @@ type 'back' to return to main menu:")
             # Step 4a: Initialize variables for calculating FTE
             output_rows = []
             total_generated_fte = 0
+            total_original_fte = 0  # Track sum of original Total FTE
 
             # Step 4b: Process each section to calculate FTE metrics
             for _, row in course_data.iterrows():
                 # Extract section prefix (first 3 chars of section name)
-                sec_prefix = row['Sec Name'][:3] if not\
-                    pd.isna(row['Sec Name']) else ""
+                sec_prefix = row['Sec Name'][:3] if not pd.isna(row['Sec Name']) else ""
 
                 # Look up new sector value for this prefix
                 new_sector_value = fte_lookup.get(sec_prefix, 0)
 
                 # Calculate total FTE for this section
-                total_fte = float(row['Total FTE']) \
-                    if pd.notna(row['Total FTE']) else 0
+                total_fte = float(row['Total FTE']) if pd.notna(row['Total FTE']) else 0
+                
+                # Add to total original FTE
+                total_original_fte += total_fte
 
                 # Calculate generated FTE using formula
                 generated_fte = total_fte * (new_sector_value + base_fte_value)
 
                 # Calculate enrollment percentage
                 enrollment_per = ""
-                if pd.notna(row['Capacity']) and\
-                        pd.notna(row['FTE Count']) and\
-                        float(row['Capacity']) > 0:
-                    enrollment_per = round((float(row['FTE Count']) /
-                                            float(row['Capacity'])) * 100, 2)
+                if pd.notna(row['Capacity']) and pd.notna(row['FTE Count']) and float(row['Capacity']) > 0:
+                    enrollment_per = round((float(row['FTE Count']) / float(row['Capacity'])) * 100, 2)
 
                 # Add section data to output rows
                 output_rows.append({
-                    'Course Code': selected_course
-                    if len(output_rows) == 0 else '',
+                    'Course Code': selected_course if len(output_rows) == 0 else '',
                     'Sec Name': row['Sec Name'],
                     'X Sec Delivery Method': row['X Sec Delivery Method'],
                     'Sec Faculty Info': row['Sec Faculty Info'],
@@ -640,7 +744,7 @@ type 'back' to return to main menu:")
                     'Capacity': row['Capacity'],
                     'FTE Count': row['FTE Count'],
                     'Total FTE': total_fte,
-                    'Enrollment Per': f"{enrollment_per}%",
+                    'Enrollment Per': "{:.2f}%".format(enrollment_per) if enrollment_per != "" else "",
                     'Generated FTE': generated_fte
                 })
 
@@ -649,46 +753,79 @@ type 'back' to return to main menu:")
 
             # Step 4c: Add a summary row with course totals
             output_rows.append({
-                'Course Code': 'Total',
+                'Course Code': 'COURSE TOTAL',
                 'Sec Name': '',
                 'X Sec Delivery Method': '',
                 'Sec Faculty Info': '',
                 'Meeting Times': '',
                 'Capacity': '',
                 'FTE Count': '',
-                'Total FTE': '',
+                'Total FTE': total_original_fte,  # Add total original FTE
                 'Enrollment Per': '',
                 'Generated FTE': total_generated_fte
             })
 
+            # Format the numeric values
             for row in output_rows:
-                row['Generated FTE'] = f"${row['Generated FTE']:,.2f}"
+                # Format Generated FTE if it's a number
+                if isinstance(row['Generated FTE'], (int, float)):
+                    row['Generated FTE'] = "${:,.2f}".format(row['Generated FTE'])
+                
+                # Format Total FTE if it's a number (including the total row)
+                if isinstance(row['Total FTE'], (int, float)):
+                    row['Total FTE'] = "{:.2f}".format(row['Total FTE'])
 
             # Step 5a: Convert to DataFrame for export
             output_df = pd.DataFrame(output_rows)
 
             # Step 5b: Create Excel file with course code as name
             file_name = f"{selected_course.replace('-', '').lower()}_FTE.xlsx"
-            output_df.to_excel(file_name, index=False)
+            
+            # Create a writer for Excel output
+            with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
+                output_df.to_excel(writer, index=False, sheet_name='Course Analysis')
+                
+                # Get the worksheet and apply formatting
+                worksheet = writer.sheets['Course Analysis']
+                
+                # Adjust column widths
+                for idx, col in enumerate(output_df.columns):
+                    max_length = max(
+                        output_df[col].astype(str).apply(len).max(),
+                        len(str(col))
+                    ) + 2
+                    worksheet.column_dimensions[chr(65 + idx)].width = max_length
+                
+                # Apply formatting to the Course Total row (bold and background color)
+                last_row = len(output_df) + 1  
+                for col in range(1, len(output_df.columns) + 1):
+                    cell = worksheet.cell(row=last_row, column=col)
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(
+                        start_color="E0E0E0", 
+                        end_color="E0E0E0",
+                        fill_type="solid"
+                    )
+                
+                # Add a bottom border to cells before the total row
+                second_last_row = last_row - 1
+                if second_last_row > 1:  # Make sure there are rows before the total
+                    for col in range(1, len(output_df.columns) + 1):
+                        cell = worksheet.cell(row=second_last_row, column=col)
+                        cell.border = Border(
+                            bottom=Side(style='thin')
+                        )
 
-            # Step 5c: Format Excel file for readability
-            wb = load_workbook(file_name)
-            ws = wb.active
-
-            for idx, col in enumerate(output_df.columns):
-                max_length = max(output_df[col].astype(str).apply(len).max(),
-                                 len(str(col))) + 2
-                ws.column_dimensions[chr(65 + idx)].width = max_length
-
-            wb.save(file_name)
-
-            # Step 5d: Display summary of results
+            # Display summary of results
             print(f"\nAnalysis for course: {selected_course}")
             print(f"Found {len(course_data)} sections")
             print(f"Results exported to {file_name}")
+            print("Course Total Original FTE: {:.2f}".format(total_original_fte))
+            print("Course Total Generated FTE: ${:,.2f}".format(total_generated_fte))
             break
 
-        except (FileNotFoundError, ValueError, KeyError):
-            print("Error processing course data")
+        except Exception as e:
+            print("Error processing course data" )
+            print(str(e))
             print(traceback.format_exc())
             continue
