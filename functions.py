@@ -89,7 +89,7 @@ def readfile():
         # sorts the dataframe by sec divisions, sec name
         # and sec faculty info and assigns it to groups
         groups = merged_df.sort_values(["Sec Divisions", "Sec Name", "Sec Faculty Info"])
-
+        print(groups.head(10))
         return groups
 
     except FileNotFoundError:
@@ -258,6 +258,7 @@ def option2_enrollment(df):
     # This assumes online sections (which contain a '9' in the section number)
     # are unique or do not duplicate.
     filtered_df = filtered_df.drop_duplicates(subset="Sec Name")
+
 
     # Define a function to calculate enrollment percentage for a row
     def calc_enrollment(row):
@@ -472,7 +473,7 @@ def division_fte(file_in):
                 'Generated FTE': adjusted_fte
             })
 
-            # Add to course total
+            # Add to course total generated fte
             course_total_fte += adjusted_fte
 
             current_course = course
